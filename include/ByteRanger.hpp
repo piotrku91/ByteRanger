@@ -12,76 +12,116 @@ piotrq.eu
 2022
 */
 
-template <typename... T2>
+template <typename... IntegerDataType>
 class ByteRanger final {
 private:
-    const std::vector<uint8_t>& vecIn_;
-    std::tuple<T2&...> content_;
-    size_t argsSize_ = 0;
-    size_t argCounter_ = 0;
-    std::vector<uint8_t>::const_iterator posCounter_;
+    const std::vector<uint8_t>& vectorDataIn_;
+    const std::tuple<IntegerDataType&...> contentReferences_;
+    std::vector<uint8_t>::const_iterator byteIterator_;
+    bool isSuccess_;
+    size_t argsSize_;
+    size_t argsCounter_;
 
-public:
-    template <typename currentType>
-    void splitBytesToVariables(currentType&& arg) {
-        if (posCounter_ >= vecIn_.end() || vecIn_.empty() || !argsSize_) {
+    // private functions
+    bool isDataWithBytesAndArgs() { return (!vectorDataIn_.empty() && argsSize_); }
+    bool isDataWithArgsWithoutBytes() { return (vectorDataIn_.empty() && argsSize_); }
+
+    template <typename CurrentProcessedType>
+    void splitBytesToVariables(CurrentProcessedType&& arg) {
+        if (byteIterator_ >= vectorDataIn_.end() || argsCounter_ > argsSize_) {
             return;
         };
 
-        argCounter_++;
-
-        if ((std::is_same<std::remove_reference_t<currentType>, uint8_t>::value) ||
-            (std::is_same<std::remove_reference_t<currentType>, int8_t>::value)) {
-            arg = *posCounter_;
-            posCounter_++;
+        if ((std::is_same<std::remove_reference_t<CurrentProcessedType>, uint8_t>::value) ||
+            (std::is_same<std::remove_reference_t<CurrentProcessedType>, int8_t>::value)) {
+            arg = static_cast<std::remove_reference_t<CurrentProcessedType>>(*byteIterator_);
+            if (byteIterator_ + 1 > vectorDataIn_.end()) {
+                arg = 0;
+                argsCounter_++;
+                return;
+            };
+            std::advance(byteIterator_, 1);
         };
 
-        if ((std::is_same<std::remove_reference_t<currentType>, uint16_t>::value) ||
-            (std::is_same<std::remove_reference_t<currentType>, int16_t>::value)) {
-            arg = static_cast<std::remove_reference_t<currentType>>((*posCounter_ << 8) + (*(posCounter_ + 1)));
-            posCounter_ += 2;
+        if ((std::is_same<std::remove_reference_t<CurrentProcessedType>, uint16_t>::value) ||
+            (std::is_same<std::remove_reference_t<CurrentProcessedType>, int16_t>::value)) {
+            arg = static_cast<std::remove_reference_t<CurrentProcessedType>>((*byteIterator_ << 8) + (*(byteIterator_ + 1)));
+            if (byteIterator_ + 2 > vectorDataIn_.end()) {
+                arg = 0;
+                argsCounter_++;
+                return;
+            };
+            std::advance(byteIterator_, 2);
         };
 
-        if ((std::is_same<std::remove_reference_t<currentType>, uint32_t>::value) ||
-            (std::is_same<std::remove_reference_t<currentType>, int32_t>::value)) {
-            arg = (*posCounter_ << 24) + (*(posCounter_ + 1) << 16) + (*(posCounter_ + 2) << 8) + *(posCounter_ + 3);
-            posCounter_ += 4;
+        if ((std::is_same<std::remove_reference_t<CurrentProcessedType>, uint32_t>::value) ||
+            (std::is_same<std::remove_reference_t<CurrentProcessedType>, int32_t>::value)) {
+            arg = static_cast<std::remove_reference_t<CurrentProcessedType>>((*byteIterator_ << 24) + (*(byteIterator_ + 1) << 16) + (*(byteIterator_ + 2) << 8) + *(byteIterator_ + 3));
+            if (byteIterator_ + 4 > vectorDataIn_.end()) {
+                arg = 0;
+                argsCounter_++;
+                return;
+            };
+            std::advance(byteIterator_, 4);
         };
+        argsCounter_++;
     }
 
-    // c - tors
-    explicit ByteRanger(const std::vector<uint8_t>& vec, T2&... args)
-        : vecIn_{vec}, content_{std::tuple<T2&...>(args...)} {
-        if (!vecIn_.empty()) {
-        posCounter_ = vecIn_.begin();
-        };
-        argsSize_ = sizeof...(T2);
+    template <typename CurrentProcessedType>
+    void writeZeroToVariables(CurrentProcessedType&& arg) {
+        arg = 0;
+        argsCounter_++;
+    }
 
-        std::apply([this](auto&&... args) {
-            (splitBytesToVariables(args), ...);
-        },
-                   content_);
+public:
+/** @brief Create object with immiedietly conversion from bytes to deducted types from variables.
+ * 
+ *  It is constructor version without any shift on the bytes vector.
+ *  @param data_vector Data vector with bytes.
+ *  @param args... Variables (references) to store data from conversion (template deduct target sizes by these arguments)
+ */
+    explicit ByteRanger(const std::vector<uint8_t>& data_vector, IntegerDataType&... args)
+        : ByteRanger(0, data_vector, args...){};
+
+/** @brief Create object with immiedietly conversion from bytes to deducted types from variables.
+ *
+ *  @param iterator_entry_shift Entry shift in bytes data vector
+ *  @param data_vector Data vector with bytes.
+ *  @param args... Variables (references) to store data from conversion (template deduct target sizes by these arguments)
+ */
+    explicit ByteRanger(size_t iterator_entry_shift, const std::vector<uint8_t>& data_vector, IntegerDataType&... args)
+        : vectorDataIn_{data_vector}, contentReferences_{std::tuple<IntegerDataType&...>(args...)}, isSuccess_{false}, argsCounter_{0} {
+        argsSize_ = sizeof...(IntegerDataType);
+
+        if (isDataWithArgsWithoutBytes()) {
+            std::apply([this](auto&&... args) { (writeZeroToVariables(args), ...); }, contentReferences_);
+            return;
+        }
+
+        if (!isDataWithBytesAndArgs()) {
+            return;
+        };
+
+        byteIterator_ = vectorDataIn_.begin();
+        std::advance(byteIterator_, iterator_entry_shift);
+        std::apply([this](auto&&... args) { (writeZeroToVariables(args), ...); }, contentReferences_);  // Clean step (init variables by 0)
+        argsCounter_ = 0;
+        std::apply([this](auto&&... args) { (splitBytesToVariables(args), ...); }, contentReferences_);
+        isSuccess_ = true;
     };
 
-    explicit ByteRanger(size_t entry_shift, const std::vector<uint8_t>& vec, T2&... args)
-        : vecIn_{vec}, content_{std::tuple<T2&...>(args...)} {
-
-        if (!vecIn_.empty()) {
-        posCounter_ = vecIn_.begin() + entry_shift;
-        };
-
-        argsSize_ = sizeof...(T2);
-        std::apply([this](auto&&... args) {
-            (splitBytesToVariables(args), ...);
-        },
-                   content_);
-    };
-
-    // deleted to avoid moving and copying object (7 rule)
+    // deleted c-tors
     ByteRanger() = delete;
     ByteRanger(ByteRanger&&) = delete;
 
-    std::tuple<T2&...> getContent() const { return content_; };
+    // Getters
+
+/** @returns State of success conversion.*/
+    size_t isSuccess() const { return isSuccess_; };
+/** @returns Amount of all arguments passed to template*/
     size_t getArgsCount() const { return argsSize_; };
-    size_t getBytesCount() const { return vecIn_.size(); };
+/** @returns Amount of all bytes passed by vector to template*/
+    size_t getBytesCount() const { return vectorDataIn_.size(); };
+/** @returns Const references to input converted variables*/
+    const std::tuple<const IntegerDataType&...> getConstReferences() { return contentReferences_; };
 };
