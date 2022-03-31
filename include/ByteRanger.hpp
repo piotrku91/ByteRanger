@@ -52,10 +52,25 @@ public:
     // c - tors
     explicit ByteRanger(const std::vector<uint8_t>& vec, T2&... args)
         : vecIn_{vec}, content_{std::tuple<T2&...>(args...)} {
+        if (!vecIn_.empty()) {
         posCounter_ = vecIn_.begin();
-
+        };
         argsSize_ = sizeof...(T2);
 
+        std::apply([this](auto&&... args) {
+            (splitBytesToVariables(args), ...);
+        },
+                   content_);
+    };
+
+    explicit ByteRanger(size_t entry_shift, const std::vector<uint8_t>& vec, T2&... args)
+        : vecIn_{vec}, content_{std::tuple<T2&...>(args...)} {
+
+        if (!vecIn_.empty()) {
+        posCounter_ = vecIn_.begin() + entry_shift;
+        };
+
+        argsSize_ = sizeof...(T2);
         std::apply([this](auto&&... args) {
             (splitBytesToVariables(args), ...);
         },
